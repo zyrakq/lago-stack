@@ -1,0 +1,29 @@
+services:
+  lago-api:
+    environment:
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+      # Cert
+      VIRTUAL_PORT: ${LAGO_API_VIRTUAL_PORT}
+      VIRTUAL_HOST: ${LAGO_API_VIRTUAL_HOST}
+      LETSENCRYPT_HOST: ${LAGO_API_VIRTUAL_HOST}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+    networks:
+      - step-ca-network
+
+  lago-front:
+    environment:
+      LAGO_DOMAIN: ${LAGO_DOMAIN}
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+      # Cert
+      VIRTUAL_PORT: ${LAGO_VIRTUAL_PORT}
+      VIRTUAL_HOST: ${LAGO_DOMAIN}
+      LETSENCRYPT_HOST: ${LAGO_DOMAIN}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+    networks:
+      - step-ca-network
+
+networks:
+  step-ca-network:
+    external: true

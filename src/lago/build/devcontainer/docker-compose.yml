@@ -1,0 +1,195 @@
+x-frontend-image: &frontend-image
+  image: getlago/front:v1.34.2
+x-backend-image: &backend-image
+  image: getlago/api:v1.34.2
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "${LOG_MAX_SIZE:-10m}"
+    max-file: "${LOG_MAX_FILE:-3}"
+    compress: "true"
+x-backend-depends: &backend-depends
+  depends_on:
+    lago-migrate:
+      condition: service_completed_successfully
+    lago-db:
+      condition: service_healthy
+      restart: true
+    lago-redis:
+      condition: service_healthy
+      restart: true
+x-app-environment: &app-env
+  LAGO_OAUTH_PROXY_URL: ${LAGO_OAUTH_PROXY_URL}
+x-pdf-environment: &pdf-env
+  LAGO_PDF_URL: ${LAGO_PDF_URL:-http://lago-pdf:3000}
+  LAGO_DISABLE_PDF_GENERATION: ${LAGO_DISABLE_PDF_GENERATION:-false}
+x-backend-environment: &backend-env
+  LAGO_SIDEKIQ_WEB: ${LAGO_SIDEKIQ_WEB:-true}
+  LAGO_LICENSE: ${LAGO_LICENSE:-}
+  # DB
+  DATABASE_URL: postgresql://${POSTGRES_USER:-lago}:${POSTGRES_PASSWORD:-changeme}@${POSTGRES_HOST:-lago-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-lago}?search_path=${POSTGRES_SCHEMA:-public}
+  # Rails
+  RAILS_ENV: production
+  RAILS_LOG_TO_STDOUT: ${LAGO_RAILS_STDOUT:-true}
+  # Encryption
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+  LAGO_RSA_PRIVATE_KEY: ${LAGO_RSA_PRIVATE_KEY}
+  LAGO_ENCRYPTION_PRIMARY_KEY: ${LAGO_ENCRYPTION_PRIMARY_KEY}
+  LAGO_ENCRYPTION_DETERMINISTIC_KEY: ${LAGO_ENCRYPTION_DETERMINISTIC_KEY}
+  LAGO_ENCRYPTION_KEY_DERIVATION_SALT: ${LAGO_ENCRYPTION_KEY_DERIVATION_SALT}
+  # Redis
+  REDIS_URL: redis://${REDIS_HOST:-lago-redis}:${REDIS_PORT:-6379}
+  REDIS_PASSWORD: ${REDIS_PASSWORD}
+  # Redis Cache
+  LAGO_REDIS_CACHE_URL: redis://${LAGO_REDIS_CACHE_HOST:-lago-redis}:${LAGO_REDIS_CACHE_PORT:-6379}
+  LAGO_REDIS_CACHE_PASSWORD: ${LAGO_REDIS_CACHE_PASSWORD}
+  # Disable
+  LAGO_DISABLE_SEGMENT: ${LAGO_DISABLE_SEGMENT}
+  LAGO_DISABLE_WALLET_REFRESH: ${LAGO_DISABLE_WALLET_REFRESH}
+  LAGO_DISABLE_SIGNUP: ${LAGO_DISABLE_SIGNUP:-false}
+  # Smtp
+  LAGO_FROM_EMAIL: ${LAGO_FROM_EMAIL:-}
+  LAGO_SMTP_ADDRESS: ${LAGO_SMTP_ADDRESS:-}
+  LAGO_SMTP_PORT: ${LAGO_SMTP_PORT:-587}
+  LAGO_SMTP_USERNAME: ${LAGO_SMTP_USERNAME:-}
+  LAGO_SMTP_PASSWORD: ${LAGO_SMTP_PASSWORD:-}
+  # Organization
+  LAGO_CREATE_ORG: ${LAGO_CREATE_ORG:-false}
+  LAGO_ORG_USER_PASSWORD: ${LAGO_ORG_USER_PASSWORD:-}
+  LAGO_ORG_USER_EMAIL: ${LAGO_ORG_USER_EMAIL:-}
+  LAGO_ORG_NAME: ${LAGO_ORG_NAME:-}
+  LAGO_ORG_API_KEY: ${LAGO_ORG_API_KEY:-}
+services:
+  lago-db:
+    image: postgres:14-alpine
+    container_name: lago-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lago}
+      POSTGRES_USER: ${POSTGRES_USER:-lago}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      PGDATA: /data/postgres
+      PGPORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_SCHEMA: public
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lago} -d ${POSTGRES_DB:-lago} -h localhost -p ${POSTGRES_PORT:-5432}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - lago-db:/data/postgres
+    networks:
+      - lago-network
+  lago-redis:
+    image: redis:6-alpine
+    container_name: lago-redis
+    restart: unless-stopped
+    command: --port ${REDIS_PORT:-6379}
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - lago-redis:/data
+    networks:
+      - lago-network
+  lago-migrate:
+    <<: *backend-image
+    container_name: lago-migrate
+    command: ["./scripts/migrate.sh"]
+    environment:
+      <<: [*backend-env, *pdf-env]
+    logging: *default-logging
+    depends_on:
+      lago-db:
+        condition: service_healthy
+        restart: true
+    networks:
+      - lago-network
+  lago-api:
+    <<: [*backend-image, *backend-depends]
+    container_name: lago-api
+    restart: unless-stopped
+    command: ["./scripts/start.api.sh"]
+    environment:
+      <<: [*app-env, *backend-env, *pdf-env]
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+    logging: *default-logging
+    healthcheck:
+      test: curl -f http://localhost:3000/health || exit 1
+      interval: 10s
+      start_period: 30s
+      timeout: 60s
+      start_interval: 2s
+    volumes:
+      - lago-storage:/app/storage
+    networks:
+      - lago-network
+      - lago-workspace-network
+  lago-worker:
+    <<: [*backend-image, *backend-depends]
+    container_name: lago-worker
+    restart: unless-stopped
+    command: ["./scripts/start.worker.sh"]
+    environment:
+      <<: [*backend-env, *pdf-env]
+    logging: *default-logging
+    healthcheck:
+      test: curl -f http://localhost:8080 || exit 1
+      interval: 10s
+      start_period: 30s
+      timeout: 60s
+      start_interval: 2s
+    volumes:
+      - lago-storage:/app/storage
+    networks:
+      - lago-network
+  lago-clock:
+    <<: [*backend-image, *backend-depends]
+    container_name: lago-clock
+    restart: unless-stopped
+    command: ["./scripts/start.clock.sh"]
+    environment:
+      <<: [*backend-env, *pdf-env]
+    logging: *default-logging
+    networks:
+      - lago-network
+  lago-pdf:
+    container_name: lago-pdf
+    image: getlago/lago-gotenberg:7.8.2
+    networks:
+      - lago-network
+  lago-front:
+    <<: *frontend-image
+    container_name: lago-front
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      APP_ENV: production
+      API_URL: ${LAGO_API_URL}
+      LAGO_DISABLE_PDF_GENERATION: ${LAGO_DISABLE_PDF_GENERATION:-false}
+      LAGO_DOMAIN: ${LAGO_DOMAIN}
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+    depends_on:
+      lago-api:
+        condition: service_healthy
+        restart: true
+    networks:
+      - lago-workspace-network
+volumes:
+  lago-db:
+    name: lago-db
+  lago-redis:
+    name: lago-redis
+  lago-storage:
+    name: lago-storage
+networks:
+  lago-network:
+    name: lago-network
+  lago-workspace-network:
+    external: true

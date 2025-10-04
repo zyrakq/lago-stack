@@ -1,0 +1,14 @@
+services:
+  lago-api:
+    environment:
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+    ports:
+      - ${API_PORT:-3000}:3000
+  lago-front:
+    environment:
+      LAGO_DOMAIN: ${LAGO_DOMAIN}
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+    ports:
+      - ${FRONT_PORT:-80}:80

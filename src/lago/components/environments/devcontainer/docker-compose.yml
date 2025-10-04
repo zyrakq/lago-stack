@@ -1,0 +1,18 @@
+services:
+  lago-api:
+    environment:
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+    networks:
+      - lago-workspace-network
+  lago-front:
+    environment:
+      LAGO_DOMAIN: ${LAGO_DOMAIN}
+      LAGO_FRONT_URL: ${LAGO_FRONT_URL}
+      LAGO_API_URL: ${LAGO_API_URL}
+    networks:
+      - lago-workspace-network
+
+networks:
+  lago-workspace-network:
+    external: true
